@@ -1,0 +1,3 @@
+build/
+tests/mbkernel/*.elf
+*.o
