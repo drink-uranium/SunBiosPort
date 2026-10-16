@@ -153,7 +153,7 @@ static void probe_drive(struct ata_chan ch, int slave, const char *ctrl_path, in
 	/* soft reset only once per channel, from the master probe */
 	if (!slave) {
 		outb(ch.ctl, 0x06); udelay(10); outb(ch.ctl, 0x02); mdelay(5);
-		wait_notbusy(&ch, 3000);
+		wait_notbusy(&ch, 10000);
 		select_drive(&tmp, 0);
 	}
 	u16 id[256];
@@ -161,7 +161,7 @@ static void probe_drive(struct ata_chan ch, int slave, const char *ctrl_path, in
 	mdelay(1);
 	st = inb(ch.cmd + REG_CMD);
 	if (st == 0) return;
-	int s = wait_notbusy(&ch, 3000);
+	int s = wait_notbusy(&ch, 10000);
 	if (s < 0) return;
 	u8 l1 = inb(ch.cmd + REG_LBA1), l2 = inb(ch.cmd + REG_LBA2);
 	bool atapi = false;
@@ -169,7 +169,7 @@ static void probe_drive(struct ata_chan ch, int slave, const char *ctrl_path, in
 		atapi = true;
 		outb(ch.cmd + REG_CMD, 0xa1);
 		mdelay(1);
-		if (wait_notbusy(&ch, 3000) < 0) return;
+		if (wait_notbusy(&ch, 10000) < 0) return;
 	} else if (l1 || l2) {
 		return;	/* SATA signature on an IDE-mode port, etc. */
 	}
