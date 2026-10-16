@@ -114,15 +114,23 @@ static void probe_devices(void)
 	}
 }
 
+/* Stop-A (F1-A on a PC keyboard, as in Solaris x86; BREAK on ttya) at any
+ * point during power-on stops auto-boot. Other keys are ignored. */
+static bool stop_a;
+
+static void poll_stop_a(void)
+{
+	int c;
+	while ((c = console_getc_nb()) >= 0)
+		if (c == KEY_STOPA) stop_a = true;
+}
+
 static bool autoboot_aborted(void)
 {
-	/* Any key (Stop-A has no PC equivalent) during the first second stops auto-boot. */
-	u64 end = timer_us() + 1000000;
-	while (timer_us() < end) {
-		int c = console_getc_nb();
-		if (c >= 0) return true;
-	}
-	return false;
+	/* a short, invisible window so a Stop-A already being held is seen */
+	u64 end = timer_us() + 300000;
+	while (timer_us() < end && !stop_a) poll_stop_a();
+	return stop_a;
 }
 
 void c_main(u32 magic, u32 mbi, u32 arg)
@@ -146,6 +154,7 @@ void c_main(u32 magic, u32 mbi, u32 arg)
 	bool reset = nv_was_reset();
 	bool diag = reset || nv_get_bool("diag-switch?");
 	if (diag) probe_memory_banks();
+	poll_stop_a();
 	if (reset) {
 		printf("Incorrect configuration checksum; \n");
 		printf("Setting NVRAM parameters to default values.\n");
@@ -157,12 +166,14 @@ void c_main(u32 magic, u32 mbi, u32 arg)
 	if (diag) printf("Probing CPU %s,%s\n", vendor, brand[0] ? brand : "x86");
 
 	bdev_probe_all();
+	poll_stop_a();
 	if (diag) probe_devices();
 
 	devalias_init();
 	devtree_init();
 	forth_init();
 	obp_banner();
+	poll_stop_a();
 
 	if (nv_get_bool("use-nvramrc?")) forth_evaluate(nv_get("nvramrc"));
 

@@ -12,6 +12,8 @@
 
 #define MAXVOL 24
 
+bool boot_verbose(void) { return nv_get_bool("diag-switch?"); }
+
 struct bootdev {
 	bool net, cbfs, legacy;
 	struct blockdev *bd;
@@ -503,7 +505,7 @@ int boot_config_text(char *text, int kind, const char *dir, const char *args, sr
 	finish_config(&c);
 	if (!c.nentries) { printf("No usable entries in boot configuration\n"); return -1; }
 	int idx = pick_entry(&c);
-	printf("Entry %d: %s\n", idx, c.e[idx].title);
+	dprintf("Entry %d: %s\n", idx, c.e[idx].title);
 	/* menu.lst paths on a TFTP server are relative to the server root */
 	return run_entry(open, ctx, &c.e[idx], args, NULL);
 }
@@ -556,7 +558,7 @@ static int boot_blockdev(struct bootdev *bdv, const char *file, const char *args
 		struct boot_config cfg;
 		if (load_config(fs, &cfg) < 0) continue;
 		int idx = pick_entry(&cfg);
-		printf("Using %s, entry %d: %s\n", cfg.path, idx, cfg.e[idx].title);
+		dprintf("Using %s, entry %d: %s\n", cfg.path, idx, cfg.e[idx].title);
 		int r = run_entry(fs_opener, fs, &cfg.e[idx], args, bdv);
 		free(cfg.e);
 		free(vols); free(fs);
@@ -567,9 +569,10 @@ static int boot_blockdev(struct bootdev *bdv, const char *file, const char *args
 		printf("Can't open %s on %s\n", file, bdv->path);
 		return -1;
 	}
-	if (!mounted) printf("No recognizable file system on %s\n", bdv->path);
-	else printf("No boot configuration found on %s\n", bdv->path);
-	if (nv_get_bool("legacy-fallback?")) return legacy_for(bdv);
+	if (!mounted) dprintf("No recognizable file system on %s\n", bdv->path);
+	else dprintf("No boot configuration found on %s\n", bdv->path);
+	if (nv_get_bool("legacy-fallback?") && legacy_for(bdv) == 0) return 0;
+	printf("Can't open boot device\n\n");
 	return -1;
 }
 
@@ -613,7 +616,7 @@ static int legacy_for_dev(struct bootdev *bdv, bool explicit)
 	if (sysinfo.bios_present) {
 		if (disk) {
 			if (!has_mbr(bdv->bd)) { printf("%s has no boot block\n", bdv->path); return -1; }
-			printf("Handing %s to the resident PC BIOS\n", bdv->path);
+			dprintf("Handing %s to the resident PC BIOS\n", bdv->path);
 			return legacy_boot(bios_drive_for(bdv->bd));
 		}
 		if (!explicit) {
@@ -621,11 +624,11 @@ static int legacy_for_dev(struct bootdev *bdv, bool explicit)
 			printf("from the resident PC BIOS.\n");
 			return -1;
 		}
-		printf("Handing off to the resident PC BIOS bootstrap loader (INT 19h)\n");
+		dprintf("Handing off to the resident PC BIOS bootstrap loader (INT 19h)\n");
 		return legacy_boot(-1);
 	}
 	if (sysinfo.from_coreboot) {
-		printf("Starting legacy BIOS payload img/seabios from CBFS\n");
+		dprintf("Starting legacy BIOS payload img/seabios from CBFS\n");
 		return cbfs_boot("img/seabios");
 	}
 	if (explicit) printf("No legacy BIOS available\n");

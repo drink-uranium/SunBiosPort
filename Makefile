@@ -1,7 +1,7 @@
 # SunBiosPort: OpenBoot for x86 as a coreboot payload.
 #
 #   make                 build build/sunbios.elf
-#   make NVRAM_CMOS=1    keep NVRAM settings in CMOS bank 1 (0x72/0x73)
+#   make NVRAM_CMOS=0    keep NVRAM settings in RAM only (default: CMOS bank 1, 0xa0-0xff)
 #   make OBP_REV=3.11    change the "ROM Rev." shown in the banner (default 2.15)
 #   make run             boot it in QEMU (Multiboot via -kernel)
 
@@ -15,6 +15,7 @@ CFLAGS := -m32 -march=i686 -O2 -g -std=gnu11 -ffreestanding -fno-pic -fno-pie \
 	-fno-stack-protector -fno-asynchronous-unwind-tables -fno-builtin \
 	-fno-tree-loop-distribute-patterns -fno-delete-null-pointer-checks -fno-strict-aliasing -mgeneral-regs-only -nostdinc \
 	-Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Wno-missing-field-initializers --param=min-pagesize=0 -Isrc
+NVRAM_CMOS ?= 1
 ifeq ($(NVRAM_CMOS),1)
 CFLAGS += -DNVRAM_CMOS
 endif

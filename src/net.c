@@ -456,7 +456,7 @@ int net_boot(const char *file, const char *args)
 		kind = 2;
 	}
 	if (have_cfg) {
-		printf("Using %s\n", cfgname);
+		dprintf("Using %s\n", cfgname);
 		char *text = malloc(cfg.size + 1);
 		if (!text) return -1;
 		memcpy(text, cfg.mem, cfg.size);

@@ -41,6 +41,10 @@ void phys_reserve(u64 start, u64 end);
 u64 phys_alloc(u64 size, u64 align, u64 min, u64 max, bool high);
 bool phys_free_range(u64 start, u64 end);
 
+/* Progress messages OpenBoot would not print; shown when diag-switch? is set. */
+bool boot_verbose(void);
+#define dprintf(...) do { if (boot_verbose()) printf(__VA_ARGS__); } while (0)
+
 typedef int (*src_opener)(void *ctx, const char *path, struct src *s);
 
 int boot_command(const char *args);

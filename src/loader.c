@@ -454,7 +454,7 @@ int linux_boot(struct src *k, const char *cmdline, struct src *initrd, int ninit
 	bp[0x211] |= 0x80;		/* CAN_USE_HEAP */
 	*(u16 *)(bp + 0x224) = 0xde00;	/* heap_end_ptr */
 	*(u32 *)(bp + 0x214) = kaddr;	/* code32_start */
-	printf("Loading kernel (%u bytes)\n", ksize);
+	dprintf("Loading kernel (%u bytes)\n", ksize);
 	if (src_load(k, koff, ksize, kaddr) < 0) return -1;
 	/* initrds are concatenated, placed as high as the kernel allows */
 	if (ninitrd) {
@@ -465,7 +465,7 @@ int linux_boot(struct src *k, const char *cmdline, struct src *initrd, int ninit
 		if (!a) { printf("No memory for initrd\n"); return -1; }
 		u64 o = 0;
 		for (int i = 0; i < ninitrd; i++) {
-			printf("Loading initrd %s (%llu bytes)\n", initrd[i].name, initrd[i].size);
+			dprintf("Loading initrd %s (%llu bytes)\n", initrd[i].name, initrd[i].size);
 			if (src_load(&initrd[i], 0, initrd[i].size, a + o) < 0) return -1;
 			o += ALIGN_UP(initrd[i].size, 4);
 		}

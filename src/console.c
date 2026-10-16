@@ -58,13 +58,19 @@ void serial_putc(char c)
 
 int serial_getc_nb(void)
 {
-	if (!ser_ok || !(ser_in(5) & 1)) return -1;
+	if (!ser_ok) return -1;
+	u8 lsr = ser_in(5);
+	if (lsr & 0x10) {	/* BREAK, the serial console's Stop-A */
+		if (lsr & 1) ser_in(0);
+		return KEY_STOPA;
+	}
+	if (!(lsr & 1)) return -1;
 	return ser_in(0);
 }
 
 /* ---------------- i8042 keyboard (scan code set 1, translated) ---------------- */
 static bool kbd_ok;
-static int shift, ctrl, caps, e0;
+static int shift, ctrl, caps, e0, f1;
 
 static const char kmap[128] = {
 	0, 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 8, 9,
@@ -146,11 +152,13 @@ int kbd_getc_nb(void)
 		return -1;
 	}
 	switch (sc) {
+	case 0x3b: f1 = !rel; return -1;
 	case 0x2a: case 0x36: shift = !rel; return -1;
 	case 0x1d: ctrl = !rel; return -1;
 	case 0x3a: if (!rel) caps = !caps; return -1;
 	}
 	if (rel) return -1;
+	if (f1 && sc == 0x1e) return KEY_STOPA;
 	char c = shift ? kmap_shift[sc] : kmap[sc];
 	if (!c) return -1;
 	if (caps && isalpha(c)) c ^= 0x20;

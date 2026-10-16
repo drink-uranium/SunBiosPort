@@ -39,9 +39,17 @@ make            # -> build/sunbios.elf
 make dist       # copy it to dist/sunbios.elf
 ```
 
-Options: `make NVRAM_CMOS=1` keeps the main NVRAM settings across reboots in
-the second CMOS bank (ports 0x72/0x73). It is off by default because some boards
-use that area. `make OBP_REV=3.11` changes the "ROM Rev." in the banner.
+NVRAM settings are saved in the second CMOS bank (ports 0x72/0x73, bytes
+0xa0–0xff; on the ThinkPad T60 coreboot only uses 0x80–0x84 of that bank). Saved
+across reboots: `auto-boot?`, `diag-switch?`, `boot-device` (31 characters),
+`boot-file` (39), `boot-entry`, `oem-banner?`, `oem-banner` (18),
+`use-nvramrc?`, `legacy-fallback?`, and `output-device ttya`. As on a Sun, the
+"Incorrect configuration checksum" message only appears when that block is
+missing or damaged (the first boot, or after a CMOS battery reset); it then sets
+`diag-switch?` to true, as in the screenshot. `setenv diag-switch? false` gives
+the normal quiet boot: banner, then `Boot device: …`. Build with
+`make NVRAM_CMOS=0` if your board uses that CMOS area (settings then last until
+reset). `make OBP_REV=3.11` changes the "ROM Rev." in the banner.
 
 ## Putting it into coreboot
 
@@ -90,8 +98,9 @@ ok dir cdrom /boot/grub       \ list files;  cat cdrom /boot/grub/menu.lst  show
 ok load disk /stand/prog  go  \ load at load-base and run
 ```
 
-Press any key during the first second after the banner to stop auto-boot
-(PC keyboards have no Stop-A).
+To stop auto-boot and get the `ok` prompt, use **Stop-A**: on a PC keyboard
+hold **F1** and press **A** (the same key combination Solaris x86 uses), or send
+a BREAK on the serial console, as on a Sun's ttya. Other keys are ignored.
 
 How `boot <device>` decides what to do:
 

@@ -12,6 +12,7 @@
 #define KEY_HOME  0x01	/* ^A */
 #define KEY_END   0x05	/* ^E */
 #define KEY_DEL   0x04	/* ^D */
+#define KEY_STOPA 0x1000	/* F1-A (Solaris x86's Stop-A) or a serial BREAK */
 
 struct fb_info {
 	uintptr_t base;
