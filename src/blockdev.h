@@ -27,6 +27,7 @@ void bdev_probe_all(void);
 void ata_probe(void);
 void ahci_probe(void);
 void nvme_probe(void);
+void ahci_dump(void);
 struct blockdev *bdev_find(const char *name);
 int bdev_read(struct blockdev *bd, u64 lba, u32 count, void *buf);
 

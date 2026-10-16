@@ -118,27 +118,13 @@ static bool link_up(uintptr_t pb, u32 ms)
 static void probe_port(struct pci_dev *pd, uintptr_t abar, int port)
 {
 	uintptr_t pb = abar + 0x100 + port * 0x80;
-
-	/* Power on and spin up the device (needed when the HBA supports
-	 * staggered spin-up, as Intel ICH parts do), then wait for the link. */
-	write32(pb + P_CMD, read32(pb + P_CMD) | (1 << 1) | (1 << 2));
-	if (!link_up(pb, 50)) {
-		/* COMRESET */
-		u32 sctl = read32(pb + P_SCTL) & ~0xfu;
-		write32(pb + P_SCTL, sctl | 1);
-		mdelay(2);
-		write32(pb + P_SCTL, sctl);
-		if (!link_up(pb, 1000)) {
-			u32 det = read32(pb + P_SSTS) & 0xf;
-			if (det) printf("SATA port %d: device present but no link (SStatus %x)\n", port, read32(pb + P_SSTS));
-			return;
-		}
-	}
 	if (port_stop(pb) < 0) {
 		printf("SATA port %d: port would not stop\n", port);
 		return;
 	}
 
+	/* Like SeaBIOS: set up the command list and FIS area and enable FIS
+	 * reception before powering up and spinning up the device. */
 	struct ahci_port *p = zalloc(sizeof(*p));
 	p->base = pb;
 	p->clb = memalign(1024, 1024);
@@ -155,6 +141,20 @@ static void probe_port(struct pci_dev *pd, uintptr_t abar, int port)
 	write32(pb + P_SERR, 0xffffffff);
 	write32(pb + P_IS, 0xffffffff);
 	write32(pb + P_CMD, read32(pb + P_CMD) | 0x10);	/* FRE */
+	write32(pb + P_CMD, read32(pb + P_CMD) | (1 << 1) | (1 << 2));	/* SUD, POD */
+	if (!link_up(pb, 200)) {
+		/* COMRESET */
+		u32 sctl = read32(pb + P_SCTL) & ~0xfu;
+		write32(pb + P_SCTL, sctl | 1);
+		mdelay(2);
+		write32(pb + P_SCTL, sctl);
+		if (!link_up(pb, 1500)) {
+			u32 det = read32(pb + P_SSTS) & 0xf;
+			if (det) printf("SATA port %d: device present but no link (SStatus %x)\n", port, read32(pb + P_SSTS));
+			write32(pb + P_CMD, read32(pb + P_CMD) & ~0x10u);
+			return;
+		}
+	}
 
 	/* The signature arrives with the device's first register FIS; give a
 	 * drive that is still spinning up time to send it. */
@@ -227,9 +227,55 @@ void ahci_probe(void)
 		pd->claimed = true;
 		pci_enable(pd);
 		write32(abar + HBA_GHC, read32(abar + HBA_GHC) | 0x80000000u);
-		u32 pi = read32(abar + HBA_PI);
-		if (!pi) pi = (2u << (read32(abar + HBA_CAP) & 0x1f)) - 1;	/* PI not set up */
+		/* Probe every port the HBA has, not only those the firmware marked
+		 * as implemented: a wrong PI value would otherwise hide a drive. */
+		u32 pi = read32(abar + HBA_PI) | ((2u << (read32(abar + HBA_CAP) & 0x1f)) - 1);
+		/* Intel ICH: skip ports switched off in the Port Control register */
+		if (pd->vendor == 0x8086 && pd->device >= 0x27c0 && pd->device <= 0x27c5) {
+			u8 pcs = pci_read8(pd->bus, pd->dev, pd->fn, 0x92) & 0x0f;
+			if (pcs) pi &= pcs;
+		}
+		int before = nbdevs;
 		for (int port = 0; port < 32; port++)
 			if (pi & (1u << port)) probe_port(pd, abar, port);
+		if (nbdevs == before) {
+			printf("SATA controller %s: no drives found\n", pd->path);
+			for (int port = 0; port < 32; port++)
+				if (pi & (1u << port))
+					printf("  port %d: SStatus %x  TFD %x  Sig %x\n", port,
+					       read32(abar + 0x100 + port * 0x80 + P_SSTS),
+					       read32(abar + 0x100 + port * 0x80 + P_TFD),
+					       read32(abar + 0x100 + port * 0x80 + P_SIG));
+		}
 	}
+}
+
+/* probe-sata: raw controller and port state, for diagnosing real hardware */
+void ahci_dump(void)
+{
+	bool any = false;
+	for (int i = 0; i < pci_ndevs; i++) {
+		struct pci_dev *pd = &pci_devs[i];
+		if (pd->class != 1 || (pd->subclass != 6 && pd->subclass != 1)) continue;
+		any = true;
+		printf("%s  %04x,%04x class %02x%02x%02x\n", pd->path, pd->vendor, pd->device,
+		       pd->class, pd->subclass, pd->progif);
+		printf("  cmd %04x  BARs %x %x %x %x %x %x\n", pci_read16(pd->bus, pd->dev, pd->fn, 4),
+		       pd->bar[0], pd->bar[1], pd->bar[2], pd->bar[3], pd->bar[4], pd->bar[5]);
+		if (pd->vendor == 0x8086)
+			printf("  MAP %02x  PCS %04x\n", pci_read8(pd->bus, pd->dev, pd->fn, 0x90),
+			       pci_read16(pd->bus, pd->dev, pd->fn, 0x92));
+		uintptr_t abar = pci_bar_mem(pd, 5);
+		if (pd->subclass != 6 || !abar) continue;
+		u32 cap = read32(abar + HBA_CAP);
+		printf("  CAP %08x  GHC %08x  PI %08x  VS %08x\n", cap, read32(abar + HBA_GHC),
+		       read32(abar + HBA_PI), read32(abar + 0x10));
+		for (int port = 0; port <= (int)(cap & 0x1f); port++) {
+			uintptr_t pb = abar + 0x100 + port * 0x80;
+			printf("  port %d: SSTS %x SCTL %x SERR %x CMD %x TFD %x SIG %x\n", port,
+			       read32(pb + P_SSTS), read32(pb + P_SCTL), read32(pb + P_SERR),
+			       read32(pb + P_CMD), read32(pb + P_TFD), read32(pb + P_SIG));
+		}
+	}
+	if (!any) printf("No SATA or IDE controllers\n");
 }

@@ -144,6 +144,8 @@ CMD(c_probedisks)
 	if (!nbdevs) printf("No disks or CD-ROM drives found\n");
 }
 
+CMD(c_probesata) { c_probedisks(w); printf("\n"); ahci_dump(); }
+
 CMD(c_probepci)
 {
 	for (int i = 0; i < pci_ndevs; i++) {
@@ -418,7 +420,7 @@ static const struct cmd cmds[] = {
 	{ "set-default", c_setdefault }, { "set-defaults", c_setdefaults }, { "devalias", c_devalias },
 	{ "nvalias", c_devalias }, { "show-devs", c_showdevs }, { "show-disks", c_showdisks },
 	{ "probe-ide", c_probedisks }, { "probe-scsi", c_probedisks }, { "probe-scsi-all", c_probedisks },
-	{ "probe-sata", c_probedisks }, { "probe-nvme", c_probedisks }, { "probe-pci", c_probepci },
+	{ "probe-sata", c_probesata }, { "probe-nvme", c_probedisks }, { "probe-pci", c_probepci },
 	{ "probe-pci-slot", c_probepci }, { ".version", c_version }, { ".speed", c_speed },
 	{ ".enet-addr", c_enet }, { ".idprom", c_idprom }, { ".memory", c_memory },
 	{ "module-info", c_moduleinfo }, { "watch-clock", c_watchclock }, { "time&date", c_timedate },
