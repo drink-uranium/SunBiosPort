@@ -224,6 +224,7 @@ void ata_probe(void)
 	for (int i = 0; i < pci_ndevs; i++) {
 		struct pci_dev *p = &pci_devs[i];
 		if (p->class != 1 || p->subclass != 1) continue;
+		p->claimed = true;
 		pci_enable(p);
 		for (int c = 0; c < 2; c++) {
 			struct ata_chan ch;

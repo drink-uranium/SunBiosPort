@@ -1,6 +1,7 @@
 /* Block device registry and a small read cache for filesystem metadata. */
 #include "blockdev.h"
 #include "console.h"
+#include "pci.h"
 
 struct blockdev *bdevs[MAX_BDEV];
 int nbdevs;
@@ -29,6 +30,12 @@ void bdev_probe_all(void)
 	ahci_probe();
 	ata_probe();
 	assign_aliases();
+	for (int i = 0; i < pci_ndevs; i++) {
+		struct pci_dev *p = &pci_devs[i];
+		if (p->class == 1 && !p->claimed)
+			printf("No driver for storage controller %s (%04x,%04x class %02x%02x%02x)\n",
+			       p->path, p->vendor, p->device, p->class, p->subclass, p->progif);
+	}
 }
 
 struct blockdev *bdev_find(const char *name)

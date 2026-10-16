@@ -151,6 +151,6 @@ void nvme_probe(void)
 {
 	for (int i = 0; i < pci_ndevs; i++) {
 		struct pci_dev *p = &pci_devs[i];
-		if (p->class == 1 && p->subclass == 8 && p->progif == 2) nvme_init(p);
+		if (p->class == 1 && p->subclass == 8) { p->claimed = true; nvme_init(p); }
 	}
 }

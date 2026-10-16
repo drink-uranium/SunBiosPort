@@ -8,6 +8,7 @@ struct pci_dev {
 	u16 vendor, device;
 	u8 class, subclass, progif, rev;
 	u8 hdr;
+	bool claimed;		/* a driver took it */
 	u32 bar[6];
 	char name[24];		/* Open Firmware generic name */
 	char path[64];		/* device tree path */

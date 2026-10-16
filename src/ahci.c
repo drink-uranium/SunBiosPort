@@ -219,9 +219,12 @@ void ahci_probe(void)
 {
 	for (int i = 0; i < pci_ndevs; i++) {
 		struct pci_dev *pd = &pci_devs[i];
-		if (pd->class != 1 || pd->subclass != 6 || pd->progif != 1) continue;
+		/* Match on the SATA subclass only: coreboot's ICH7 code writes 0x8f
+		 * to the programming interface byte even in AHCI mode. */
+		if (pd->class != 1 || pd->subclass != 6) continue;
 		uintptr_t abar = pci_bar_mem(pd, 5);
 		if (!abar) continue;
+		pd->claimed = true;
 		pci_enable(pd);
 		write32(abar + HBA_GHC, read32(abar + HBA_GHC) | 0x80000000u);
 		u32 pi = read32(abar + HBA_PI);
