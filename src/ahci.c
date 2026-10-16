@@ -103,18 +103,44 @@ static int ahci_read(struct blockdev *bd, u64 lba, u32 count, void *buf)
 	return 0;
 }
 
+#define P_SCTL 0x2c
+
+static bool link_up(uintptr_t pb, u32 ms)
+{
+	u64 end = timer_us() + (u64)ms * 1000;
+	do {
+		if ((read32(pb + P_SSTS) & 0xf) == 3) return true;
+		udelay(1000);
+	} while (timer_us() < end);
+	return false;
+}
+
 static void probe_port(struct pci_dev *pd, uintptr_t abar, int port)
 {
 	uintptr_t pb = abar + 0x100 + port * 0x80;
-	u32 ssts = read32(pb + P_SSTS);
-	if ((ssts & 0xf) != 3) return;
-	u32 sig = read32(pb + P_SIG);
-	if (sig != 0x00000101 && sig != 0xeb140101) return;
-	if (port_stop(pb) < 0) return;
+
+	/* Power on and spin up the device (needed when the HBA supports
+	 * staggered spin-up, as Intel ICH parts do), then wait for the link. */
+	write32(pb + P_CMD, read32(pb + P_CMD) | (1 << 1) | (1 << 2));
+	if (!link_up(pb, 50)) {
+		/* COMRESET */
+		u32 sctl = read32(pb + P_SCTL) & ~0xfu;
+		write32(pb + P_SCTL, sctl | 1);
+		mdelay(2);
+		write32(pb + P_SCTL, sctl);
+		if (!link_up(pb, 1000)) {
+			u32 det = read32(pb + P_SSTS) & 0xf;
+			if (det) printf("SATA port %d: device present but no link (SStatus %x)\n", port, read32(pb + P_SSTS));
+			return;
+		}
+	}
+	if (port_stop(pb) < 0) {
+		printf("SATA port %d: port would not stop\n", port);
+		return;
+	}
 
 	struct ahci_port *p = zalloc(sizeof(*p));
 	p->base = pb;
-	p->atapi = sig == 0xeb140101;
 	p->clb = memalign(1024, 1024);
 	p->fis = memalign(256, 256);
 	p->tbl = memalign(128, 0x80 + NPRD * 16);
@@ -129,21 +155,43 @@ static void probe_port(struct pci_dev *pd, uintptr_t abar, int port)
 	write32(pb + P_SERR, 0xffffffff);
 	write32(pb + P_IS, 0xffffffff);
 	write32(pb + P_CMD, read32(pb + P_CMD) | 0x10);	/* FRE */
+
+	/* The signature arrives with the device's first register FIS; give a
+	 * drive that is still spinning up time to send it. */
+	u64 end = timer_us() + 10000000;
+	while ((read32(pb + P_TFD) & 0x80) && timer_us() < end) mdelay(10);
+	u32 sig = read32(pb + P_SIG);
+	write32(pb + P_SERR, 0xffffffff);
 	write32(pb + P_CMD, read32(pb + P_CMD) | 0x01);	/* ST */
+
+	/* Unknown signature (some chipsets never latch it): ask the device. */
+	u16 *id = (u16 *)p->bounce;
+	bool ok;
+	if (sig == 0xeb140101) {
+		p->atapi = true;
+		ok = ahci_cmd(p, 0xa1, 0, 0, NULL, 512) == 0;
+	} else {
+		ok = ahci_cmd(p, 0xec, 0, 0, NULL, 512) == 0;
+		if (!ok && sig != 0x00000101) {
+			p->atapi = true;
+			ok = ahci_cmd(p, 0xa1, 0, 0, NULL, 512) == 0;
+		}
+	}
+	if (!ok) {
+		printf("SATA port %d: device did not answer IDENTIFY (signature %x)\n", port, sig);
+		return;
+	}
 
 	struct blockdev *bd = bdev_register();
 	if (!bd) return;
 	bd->priv = p;
 	bd->driver = "ahci";
 	bd->read = ahci_read;
-	u16 *id = (u16 *)p->bounce;
-	if (ahci_cmd(p, p->atapi ? 0xa1 : 0xec, 0, 0, NULL, 512) == 0) {
-		for (int i = 0; i < 20; i++) {
-			bd->model[i * 2] = id[27 + i] >> 8;
-			bd->model[i * 2 + 1] = id[27 + i] & 0xff;
-		}
-		for (int i = 39; i >= 0 && (bd->model[i] == ' ' || !bd->model[i]); i--) bd->model[i] = 0;
+	for (int i = 0; i < 20; i++) {
+		bd->model[i * 2] = id[27 + i] >> 8;
+		bd->model[i * 2 + 1] = id[27 + i] & 0xff;
 	}
+	for (int i = 39; i >= 0 && (bd->model[i] == ' ' || !bd->model[i]); i--) bd->model[i] = 0;
 	if (p->atapi) {
 		bd->type = BDEV_CDROM;
 		bd->sector_size = 2048;
@@ -160,8 +208,9 @@ static void probe_port(struct pci_dev *pd, uintptr_t abar, int port)
 	} else {
 		bd->type = BDEV_DISK;
 		bd->sector_size = 512;
-		bd->nsectors = *(u64 *)&id[100];
-		if (!bd->nsectors) bd->nsectors = id[60] | ((u32)id[61] << 16);
+		u64 n48;
+		memcpy(&n48, &id[100], 8);
+		bd->nsectors = (id[83] & (1 << 10)) && n48 ? n48 : (id[60] | ((u32)id[61] << 16));
 		snprintf(bd->path, sizeof(bd->path), "%s/disk@%d,0", pd->path, port);
 	}
 }
@@ -176,6 +225,7 @@ void ahci_probe(void)
 		pci_enable(pd);
 		write32(abar + HBA_GHC, read32(abar + HBA_GHC) | 0x80000000u);
 		u32 pi = read32(abar + HBA_PI);
+		if (!pi) pi = (2u << (read32(abar + HBA_CAP) & 0x1f)) - 1;	/* PI not set up */
 		for (int port = 0; port < 32; port++)
 			if (pi & (1u << port)) probe_port(pd, abar, port);
 	}
